@@ -1,6 +1,6 @@
 {
   "name": "decky-wifi-locker",
-  "version": "1.0.2",
+  "version": "1.0.5",
   "description": "Lock WiFi to a specific access point to prevent background scanning",
   "type": "module",
   "scripts": {
