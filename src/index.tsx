@@ -3,7 +3,8 @@ import {
   PanelSection,
   PanelSectionRow,
   staticClasses,
-  Field
+  Field,
+  ToggleField
 } from "@decky/ui";
 import {
   callable,
@@ -18,6 +19,8 @@ const lockWifi = callable<[], any>("lock_wifi");
 const unlockWifi = callable<[], any>("unlock_wifi");
 const getWifiStatus = callable<[], any>("get_wifi_status");
 const forceDeleteState = callable<[], any>("force_delete_state");
+const getSettings = callable<[], any>("get_settings");
+const setAutoLockOnStartup = callable<[{ enabled: boolean }], any>("set_auto_lock_on_startup");
 
 function Content() {
   const [wifiStatus, setWifiStatus] = useState<{
@@ -28,6 +31,7 @@ function Content() {
   const [isLocking, setIsLocking] = useState<boolean>(false);
   const [isUnlocking, setIsUnlocking] = useState<boolean>(false);
   const [isResetting, setIsResetting] = useState<boolean>(false);
+  const [autoLockOnStartup, setAutoLockOnStartupState] = useState<boolean>(false);
 
   // Function to refresh the WiFi status
   const refreshWifiStatus = async () => {
@@ -45,9 +49,12 @@ function Content() {
     }
   };
 
-  // Load WiFi status on component mount
+  // Load WiFi status and settings on component mount
   useEffect(() => {
     refreshWifiStatus();
+    getSettings().then((s: any) => {
+      setAutoLockOnStartupState(s?.auto_lock_on_startup ?? false);
+    }).catch((err: any) => console.error("Error loading settings:", err));
   }, []);
 
   // Handle WiFi locking
@@ -227,6 +234,23 @@ function Content() {
           </PanelSectionRow>
         </>
       )}
+      <PanelSectionRow>
+        <ToggleField
+          label="Auto-lock on startup"
+          description="Automatically lock WiFi when the plugin loads"
+          checked={autoLockOnStartup}
+          disabled={isLocking || isUnlocking || isResetting}
+          onChange={async (value: boolean) => {
+            setAutoLockOnStartupState(value);
+            try {
+              await setAutoLockOnStartup({ enabled: value });
+            } catch (err) {
+              console.error("Error saving auto-lock setting:", err);
+              setAutoLockOnStartupState(!value);
+            }
+          }}
+        />
+      </PanelSectionRow>
     </PanelSection>
 
     <PanelSection title="Troubleshooting">

@@ -3,7 +3,12 @@ import json
 import subprocess
 import shutil
 import asyncio
+from pathlib import Path
+from typing import TypedDict
 import decky
+
+class PluginSettings(TypedDict):
+    auto_lock_on_startup: bool
 
 class Plugin:
     # State to track if WiFi is currently locked
@@ -15,6 +20,24 @@ class Plugin:
     lock_script_path = os.path.join(decky.DECKY_PLUGIN_DIR, "assets", "lock_wifi.sh")
     unlock_script_path = os.path.join(decky.DECKY_PLUGIN_DIR, "assets", "unlock_wifi.sh")
     state_file_path = os.path.join(decky.DECKY_PLUGIN_RUNTIME_DIR, "wifi_lock_state.json")
+    settings_file_path: Path = Path(decky.DECKY_PLUGIN_SETTINGS_DIR) / "wifi_locker_settings.json"
+
+    def _load_settings(self) -> PluginSettings:
+        """Load plugin settings from disk, returning defaults if absent or malformed."""
+        try:
+            if self.settings_file_path.exists():
+                return json.loads(self.settings_file_path.read_text())
+        except Exception as e:
+            decky.logger.error(f"Error reading settings file: {e}")
+        return {"auto_lock_on_startup": False}
+
+    def _save_settings(self, data: PluginSettings) -> None:
+        """Persist plugin settings to disk."""
+        try:
+            self.settings_file_path.parent.mkdir(parents=True, exist_ok=True)
+            _ = self.settings_file_path.write_text(json.dumps(dict(data)))
+        except Exception as e:
+            decky.logger.error(f"Error saving settings file: {e}")
 
     def _get_clean_env(self):
         """Get environment with cleared LD_LIBRARY_PATH to fix decky-loader subprocess issues"""
@@ -24,7 +47,7 @@ class Plugin:
         return env 
     
     # Lock WiFi to current BSSID
-    async def lock_wifi(self) -> dict:
+    async def lock_wifi(self) -> dict[str, object]:
         if self.wifi_locked:
             return {"success": False, "message": "WiFi already locked", "ssid": self.current_ssid, "bssid": self.current_bssid}
         
@@ -201,6 +224,37 @@ class Plugin:
             "ssid": self.current_ssid,
             "bssid": self.current_bssid
         }
+
+    async def _auto_lock_on_startup(self) -> None:
+        """Lock WiFi on startup if the auto_lock_on_startup setting is enabled."""
+        settings = self._load_settings()
+        if not settings["auto_lock_on_startup"] or self.wifi_locked:
+            return
+        decky.logger.info("auto_lock_on_startup is enabled — locking WiFi now.")
+        try:
+            lock_result = await self.lock_wifi()
+            if lock_result.get("success"):
+                decky.logger.info(f"Auto-lock succeeded: {lock_result.get('ssid')}")
+            else:
+                decky.logger.error(f"Auto-lock failed: {lock_result.get('message')}")
+        except Exception as e:
+            decky.logger.error(f"Exception during auto-lock on startup: {e}")
+
+    # Get plugin settings
+    async def get_settings(self) -> PluginSettings:
+        return self._load_settings()
+
+    # Set the auto-lock on startup preference
+    async def set_auto_lock_on_startup(self, enabled: bool) -> dict[str, bool | str]:
+        try:
+            settings = self._load_settings()
+            settings["auto_lock_on_startup"] = enabled
+            self._save_settings(settings)
+            decky.logger.info(f"auto_lock_on_startup set to {enabled}")
+            return {"success": True}
+        except Exception as e:
+            decky.logger.error(f"Error saving auto_lock_on_startup: {e}")
+            return {"success": False, "message": str(e)}
     
     # Force delete the state file and reset in-memory state
     async def force_delete_state(self) -> dict:
@@ -326,6 +380,8 @@ class Plugin:
             self.wifi_locked = False
             self.current_ssid = None
             self.current_bssid = None
+
+        await self._auto_lock_on_startup()
 
         decky.logger.info("WiFi Locker plugin initialized")
 
